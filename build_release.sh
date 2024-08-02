@@ -11,4 +11,4 @@
 # fi
 # chmod +rw atlas.odin
 
-odin build main_release -out:game_release.bin -no-bounds-check -o:speed -strict-style -vet-unused -vet-using-stmt -vet-using-param -vet-style -vet-semicolon
+odin build src/main_release -out:bin/release/game_release.bin -no-bounds-check -o:speed -strict-style -vet-unused -vet-using-stmt -vet-using-param -vet-style -vet-semicolon

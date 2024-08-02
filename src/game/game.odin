@@ -68,8 +68,8 @@ draw :: proc() {
 	
 	rl.BeginMode2D(game_camera())
 	rl.DrawRectangleV(g_mem.player_pos, {10, 20}, rl.WHITE)
-	rl.DrawRectangleV({20, 20}, {10, 10}, rl.RED)
-	rl.DrawRectangleV({-30, -20}, {10, 10}, rl.GREEN)
+	rl.DrawRectangleV({20, 20}, {10, 10}, rl.BLUE)
+	rl.DrawRectangleV({-30, -20}, {10, 10}, rl.RED)
 	rl.EndMode2D()
 
 	rl.BeginMode2D(ui_camera())
@@ -89,8 +89,7 @@ game_update :: proc() -> bool {
 @(export)
 game_init_window :: proc() {
 	rl.SetConfigFlags({.WINDOW_RESIZABLE})
-	rl.InitWindow(1280, 720, "Odin + Raylib + Hot Reload template!")
-	rl.SetWindowPosition(200, 200)
+	rl.InitWindow(1280, 720, "Odin + Raylib + Hot Reload template!")	
 	rl.SetTargetFPS(500)
 }
 

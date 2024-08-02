@@ -1,14 +1,26 @@
+# Build output
 *.exe
-*.sublime-workspace
-*.pdb
-*.raddbgi
 *.dll
-*.exp
+*.bin
 *.obj
 *.lib
-log.txt
-*.bin
-*.dylib
 *.so
+*.exp
+*.dylib
+
+# Debug output
+*.pdb
+*.raddbgi
 *.dSYM
+
+# Runtime output
+log.txt
+
+# IDE
+*.sublime-workspace
+
+# Linux 
 linux
+
+# Odin related
+ols.json
