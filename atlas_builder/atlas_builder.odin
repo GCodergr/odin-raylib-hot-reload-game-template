@@ -1,5 +1,5 @@
 // This atlas builder looks into a 'textures' folder for pngs, ase and aseprite files and makes an atlas
-// from those. It outputs both atlas.png and atlas.odin. The odin file you compile as part of your game
+// from those. It outputs both atlas.png and atlas.odin. The odin file you compile as part of your game,
 // it contains metadata about where in the atlas the stuff is.
 //
 // The atlas builder can also split up tilesets and fonts and splat those out into the atlas. Look for
@@ -24,6 +24,9 @@ import rl "vendor:raylib"
 
 TILESET_WIDTH :: 10
 TILE_SIZE :: 10
+
+PACKAGE_NAME :: "game"
+TEXTURES_DIR :: "textures"
 
 dir_path_to_file_infos :: proc(path: string) -> []os.File_Info {
 	d, derr := os.open(path, os.O_RDONLY)
@@ -121,41 +124,35 @@ load_tileset :: proc(filename: string, t: ^Tileset) {
 	}
 
 	indexed := doc.header.color_depth == .Indexed
-
-	for f in doc.frames {
-		palette: ase.Palette_Chunk
-		collision_layer := -1
-		layers := 0
-
-		for c in f.chunks {
-			if p, ok := c.(ase.Palette_Chunk); ok {
-				palette = p
-			} else if l, ok := c.(ase.Layer_Chunk); ok {
-				if l.name == "collision" {
-					collision_layer = layers
+	palette: ase.Palette_Chunk
+	if indexed {
+		for f in doc.frames {
+			for c in f.chunks {
+				if p, ok := c.(ase.Palette_Chunk); ok {
+					palette = p
+					break
 				}
-
-				layers += 1
 			}
 		}
+	}
+	
+	if indexed && len(palette.entries) == 0 {
+		fmt.println("Document is indexed, but found no palette!")
+	}
 
-		if indexed && len(palette.entries) == 0 {
-			fmt.println("Document is indexed, but found no palette!")
-			continue
-		}
-
+	for f in doc.frames {
 		for c in f.chunks {
 			#partial switch cv in c {
 				case ase.Cel_Chunk:
 					if cl, ok := cv.cel.(ase.Com_Image_Cel); ok {
-						if int(cv.layer_index) == collision_layer {
-							break
-						}
-
 						if indexed {
 							t.pixels = make([]rl.Color, int(cl.width) * int(cl.height))
 							for p, idx in cl.pixel {
-								t.pixels[idx] = rl.Color(palette.entries[u32(p)].color.abgr)
+								if p == 0 {
+									continue
+								}
+
+								t.pixels[idx] = rl.Color(palette.entries[u32(p)].color)
 							}
 						} else {
 							t.pixels = slice.clone(transmute([]rl.Color)(cl.pixel))
@@ -174,6 +171,9 @@ Animation :: struct {
 	name: string,
 	first_texture: string,
 	last_texture: string,
+	document_size: Vec2i,
+	loop_direction: ase.Tag_Loop_Dir,
+	repeat: u16,
 }
 
 load_ase_texture_data :: proc(filename: string, textures: ^[dynamic]Texture_Data, animations: ^[dynamic]Animation) {
@@ -191,39 +191,33 @@ load_ase_texture_data :: proc(filename: string, textures: ^[dynamic]Texture_Data
 		return
 	}
 
-	base_name := asset_name(filename)
-	frame_idx := 0
-	animated := len(doc.frames) > 1
-	indexed := doc.header.color_depth == .Indexed
-
 	document_rect := rl.Rectangle {
 		0, 0,
 		f32(doc.header.width), f32(doc.header.height),
 	}
 
-	for f in doc.frames {
-		duration: f32 = f32(f.header.duration)/1000.0
-		palette: ase.Palette_Chunk
-		collision_layer := -1
-
-		layers := 0
-
-		for c in f.chunks {
-			if p, ok := c.(ase.Palette_Chunk); ok {
-				palette = p
-			} else if l, ok := c.(ase.Layer_Chunk); ok {
-				if l.name == "collision" {
-					collision_layer = layers
+	base_name := asset_name(filename)
+	frame_idx := 0
+	animated := len(doc.frames) > 1
+	indexed := doc.header.color_depth == .Indexed
+	palette: ase.Palette_Chunk
+	if indexed {
+		for f in doc.frames {
+			for c in f.chunks {
+				if p, ok := c.(ase.Palette_Chunk); ok {
+					palette = p
+					break
 				}
-
-				layers += 1
 			}
 		}
+	}
+	
+	if indexed && len(palette.entries) == 0 {
+		fmt.println("Document is indexed, but found no palette!")
+	}
 
-		if indexed && len(palette.entries) == 0 {
-			fmt.println("Document is indexed, but found no palette!")
-			continue
-		}
+	for f in doc.frames {
+		duration: f32 = f32(f.header.duration)/1000.0
 
 		cels: [dynamic]^ase.Cel_Chunk
 		cel_min := Vec2i { max(int), max(int) }
@@ -238,6 +232,17 @@ load_ase_texture_data :: proc(filename: string, textures: ^[dynamic]Texture_Data
 					cel_max.x = max(cel_max.x, int(c.x) + int(cl.width))
 					cel_max.y = max(cel_max.y, int(c.y) + int(cl.height))
 					append(&cels, &c)
+				}
+			case ase.Tags_Chunk:
+				for tag in c {
+					a := Animation {
+						name = fmt.tprint(base_name, tag.name, sep = "_"),
+						first_texture = fmt.tprint(base_name, tag.from_frame, sep = ""),
+						last_texture = fmt.tprint(base_name, tag.to_frame, sep = ""),
+						loop_direction = tag.loop_direction,
+						repeat = tag.repeat,
+					}
+					append(animations, a)
 				}
 			}
 		}
@@ -271,7 +276,11 @@ load_ase_texture_data :: proc(filename: string, textures: ^[dynamic]Texture_Data
 			if indexed {
 				pixels = make([]rl.Color, int(cl.width) * int(cl.height))
 				for p, idx in cl.pixel {
-					pixels[idx] = rl.Color(palette.entries[u32(p)].color.abgr)
+					if p == 0 {
+						continue
+					}
+					
+					pixels[idx] = rl.Color(palette.entries[u32(p)].color)
 				}
 			} else {
 				pixels = transmute([]rl.Color)(cl.pixel)
@@ -334,6 +343,7 @@ load_ase_texture_data :: proc(filename: string, textures: ^[dynamic]Texture_Data
 			name = base_name,
 			first_texture = fmt.tprint(base_name, 0, sep = ""),
 			last_texture = fmt.tprint(base_name, frame_idx - 1, sep = ""),
+			document_size = {int(document_rect.width), int(document_rect.height)},
 		}
 
 		append(animations, a)
@@ -384,7 +394,7 @@ main :: proc() {
 	textures: [dynamic]Texture_Data
 	animations: [dynamic]Animation
 
-	file_infos := dir_path_to_file_infos("textures")
+	file_infos := dir_path_to_file_infos(TEXTURES_DIR)
 
 	slice.sort_by(file_infos, proc(i, j: os.File_Info) -> bool {
 		return time.diff(i.creation_time, j.creation_time) > 0
@@ -396,7 +406,7 @@ main :: proc() {
 		is_ase := strings.has_suffix(fi.name, ".ase") || strings.has_suffix(fi.name, ".aseprite")
 		is_png := strings.has_suffix(fi.name, ".png")
 		if is_ase || is_png {
-			path := fmt.tprintf("textures/%s", fi.name)
+			path := fmt.tprintf("%s/%s", TEXTURES_DIR, fi.name)
 			if strings.has_prefix(fi.name, "tileset") {
 				load_tileset(path, &tileset)
 			} else if is_ase {
@@ -704,12 +714,14 @@ main :: proc() {
 		}
 	}
 
+	rl.ImageAlphaCrop(&atlas, 0)
+
 	rl.ExportImage(atlas, "atlas.png")
 
 	f, _ := os.open("atlas.odin", os.O_WRONLY | os.O_CREATE | os.O_TRUNC)
 	defer os.close(f)
 
-	fmt.fprintln(f, "package game")
+	fmt.fprintf(f, "package %s\n", PACKAGE_NAME)
 	fmt.fprintln(f, "")
 
 	fmt.fprintln(f, "Texture_Name :: enum {")
@@ -758,8 +770,8 @@ main :: proc() {
 	fmt.fprintf(f, "shapes_texture_rect := Rect {{%v, %v, %v, %v}}\n\n", shapes_texture_rect.x, shapes_texture_rect.y, shapes_texture_rect.width, shapes_texture_rect.height)
 
 	fmt.fprintln(f, "Tile_Id :: enum {")
-	for y in 0..<10 {
-		for x in 0..<10 {
+	for y in 0..<TILESET_WIDTH {
+		for x in 0..<TILESET_WIDTH {
 			fmt.fprintf(f, "\tT0Y%vX%v,\n", y, x)
 		}
 	}
@@ -783,9 +795,20 @@ main :: proc() {
 	fmt.fprintln(f, "}")
 	fmt.fprintln(f, "")
 
+	fmt.fprintln(f, "Tag_Loop_Dir :: enum {")
+	fmt.fprintln(f, "\tForward,")
+	fmt.fprintln(f, "\tReverse,")
+	fmt.fprintln(f, "\tPing_Pong,")
+	fmt.fprintln(f, "\tPing_Pong_Reverse,")
+	fmt.fprintln(f, "}")
+	fmt.fprintln(f, "")
+
 	fmt.fprintln(f, "Atlas_Animation :: struct {")
 	fmt.fprintln(f, "\tfirst_frame: Texture_Name,")
 	fmt.fprintln(f, "\tlast_frame: Texture_Name,")
+	fmt.fprintln(f, "\tdocument_size: Vec2i,")
+	fmt.fprintln(f, "\tloop_direction: Tag_Loop_Dir,")
+	fmt.fprintln(f, "\trepeat: u16,")
 	fmt.fprintln(f, "}")
 	fmt.fprintln(f, "")
 
@@ -793,8 +816,8 @@ main :: proc() {
 	fmt.fprint(f, "\t.None = {},\n")
 
 	for a in animations {
-		fmt.fprintf(f, "\t.%v = {{ first_frame = .%v, last_frame = .%v }},\n",
-			a.name, a.first_texture, a.last_texture)
+		fmt.fprintf(f, "\t.%v = {{ first_frame = .%v, last_frame = .%v, loop_direction = .%v, repeat = %v, document_size = {{%v, %v}} }},\n",
+			a.name, a.first_texture, a.last_texture, a.loop_direction, a.repeat, a.document_size.x, a.document_size.y)
 	}
 
 	fmt.fprintln(f, "}\n")
